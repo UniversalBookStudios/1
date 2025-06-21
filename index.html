@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camino de la Claridad</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Lato', sans-serif;
+            overflow: hidden;
+            background-color: #1a202c; /* Equivalent to dark gray bg-gray-900 */
+        }
+        .font-serif {
+            font-family: 'Playfair Display', serif;
+        }
+        #gameCanvas {
+            background: radial-gradient(circle, #4a5568 0%, #1a202c 70%);
+            cursor: pointer;
+            display: block;
+        }
+        .game-ui {
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+        }
+        .vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-shadow: inset 0 0 150px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen m-0 p-0">
+
+    <div id="gameContainer" class="relative w-full h-full max-w-screen-lg max-h-screen-lg">
+        <!-- Game UI Elements -->
+        <div class="absolute top-5 left-5 text-lg game-ui z-10">
+            <p>Puntuación: <span id="score">0</span></p>
+        </div>
+        <div class="absolute top-5 right-5 text-lg game-ui z-10">
+            <p>Vida: <span id="health-bar">❤️❤️❤️</span></p>
+        </div>
+
+        <!-- Start Menu -->
+        <div id="startMenu" class="absolute inset-0 bg-black bg-opacity-60 flex flex-col items-center justify-center text-center z-20 p-4">
+            <h1 class="text-5xl md:text-7xl font-serif mb-4 text-amber-300">Camino de la Claridad</h1>
+            <p class="text-lg md:text-xl max-w-xl mb-8">
+                Protege tu luz interior de las sombras de la duda y la distracción. Haz clic en las sombras para disiparlas. Mantén tu llama brillante y tu camino despejado.
+            </p>
+            <button id="startButton" class="bg-amber-400 hover:bg-amber-500 text-gray-900 font-bold py-3 px-8 rounded-full text-xl transition-transform transform hover:scale-105 shadow-lg">
+                Comenzar
+            </button>
+        </div>
+
+        <!-- Game Over Menu -->
+        <div id="gameOverMenu" class="hidden absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center text-center z-20 p-4">
+            <h1 class="text-5xl md:text-7xl font-serif mb-4 text-red-400">La Llama se Extinguió</h1>
+            <p class="text-xl mb-2">Tu puntuación final es:</p>
+            <p id="finalScore" class="text-4xl font-bold mb-8 text-amber-300"></p>
+            <button id="restartButton" class="bg-amber-400 hover:bg-amber-500 text-gray-900 font-bold py-3 px-8 rounded-full text-xl transition-transform transform hover:scale-105 shadow-lg">
+                Intentar de Nuevo
+            </button>
+        </div>
+        
+        <canvas id="gameCanvas"></canvas>
+        <div class="vignette"></div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const healthBarEl = document.getElementById('health-bar');
+        const startMenu = document.getElementById('startMenu');
+        const gameOverMenu = document.getElementById('gameOverMenu');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const finalScoreEl = document.getElementById('finalScore');
+        
+        // --- Game Configuration ---
+        let score = 0;
+        let health = 3;
+        let gameActive = false;
+        let animationFrameId;
+        
+        let shadows = [];
+        let particles = [];
+        const flame = { x: 0, y: 0, size: 50, baseSize: 50 };
+        
+        // --- Utility Functions ---
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            flame.x = canvas.width / 2;
+            flame.y = canvas.height / 2;
+        }
+
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // --- Game Object Classes ---
+        class Shadow {
+            constructor() {
+                // Spawn from edges
+                const edge = Math.floor(random(0, 4));
+                if (edge === 0) { // top
+                    this.x = random(0, canvas.width);
+                    this.y = -30;
+                } else if (edge === 1) { // right
+                    this.x = canvas.width + 30;
+                    this.y = random(0, canvas.height);
+                } else if (edge === 2) { // bottom
+                    this.x = random(0, canvas.width);
+                    this.y = canvas.height + 30;
+                } else { // left
+                    this.x = -30;
+                    this.y = random(0, canvas.height);
+                }
+                
+                this.size = random(20, 40);
+                this.speed = random(0.5, 1.5) * (1 + score / 5000); // Speed increases with score
+                this.angle = Math.atan2(flame.y - this.y, flame.x - this.x);
+            }
+
+            update() {
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(this.x, this.y, this.size * 0.1, this.x, this.y, this.size);
+                gradient.addColorStop(0, 'rgba(30, 30, 40, 0.9)');
+                gradient.addColorStop(1, 'rgba(10, 10, 20, 0)');
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            }
+        }
+
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = random(2, 5);
+                this.speedX = random(-2, 2);
+                this.speedY = random(-2, 2);
+                this.life = 1; // 1 = 100%
+                this.color = `rgba(255, 220, 150, ${this.life})`;
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.03;
+                this.color = `rgba(255, 220, 150, ${Math.max(0, this.life)})`;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // --- Game Logic ---
+        function spawnShadow() {
+            if (gameActive) {
+                shadows.push(new Shadow());
+                const spawnRate = Math.max(200, 1500 - score / 10);
+                setTimeout(spawnShadow, spawnRate);
+            }
+        }
+
+        function drawFlame() {
+            // Pulsating effect
+            const pulse = Math.sin(Date.now() * 0.005) * 5;
+            flame.size = flame.baseSize + pulse;
+
+            // Gradient for glow
+            const gradient = ctx.createRadialGradient(flame.x, flame.y, flame.size * 0.2, flame.x, flame.y, flame.size);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.2, 'rgba(255, 200, 0, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 100, 0, 0)');
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(flame.x, flame.y, flame.size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Core flame
+            ctx.font = `${flame.size * 0.8}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🔥', flame.x, flame.y);
+        }
+        
+        function updateUI() {
+            scoreEl.textContent = score;
+            healthBarEl.textContent = '❤️'.repeat(Math.max(0, health));
+        }
+
+        function takeDamage() {
+            health--;
+            flame.baseSize = Math.max(20, flame.baseSize - 10);
+            updateUI();
+            
+            // Screen shake effect
+            canvas.style.transform = `translate(${random(-5, 5)}px, ${random(-5, 5)}px)`;
+            setTimeout(() => canvas.style.transform = '', 100);
+
+            if (health <= 0) {
+                endGame();
+            }
+        }
+
+        function handleClick(e) {
+            if (!gameActive) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            let shadowClicked = false;
+            for (let i = shadows.length - 1; i >= 0; i--) {
+                const s = shadows[i];
+                const distance = Math.sqrt((clickX - s.x)**2 + (clickY - s.y)**2);
+                if (distance < s.size) {
+                    // Create particle explosion
+                    for (let j = 0; j < 15; j++) {
+                        particles.push(new Particle(s.x, s.y));
+                    }
+                    shadows.splice(i, 1);
+                    score += 100;
+                    updateUI();
+                    shadowClicked = true;
+                    break; // Click only one shadow at a time
+                }
+            }
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawFlame();
+
+            // Update and draw particles
+            particles.forEach((p, index) => {
+                p.update();
+                p.draw();
+                if (p.life <= 0) {
+                    particles.splice(index, 1);
+                }
+            });
+
+            // Update and draw shadows
+            shadows.forEach((s, index) => {
+                s.update();
+                s.draw();
+
+                // Check collision with flame
+                const distance = Math.sqrt((s.x - flame.x)**2 + (s.y - flame.y)**2);
+                if (distance < s.size + flame.size / 2) {
+                    shadows.splice(index, 1);
+                    takeDamage();
+                }
+            });
+
+            // Continuously add score for survival
+            score += 1;
+            updateUI();
+            
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Game State Management ---
+        function startGame() {
+            score = 0;
+            health = 3;
+            shadows = [];
+            particles = [];
+            flame.baseSize = 50;
+            gameActive = true;
+            startMenu.classList.add('hidden');
+            gameOverMenu.classList.add('hidden');
+            resizeCanvas();
+            updateUI();
+            gameLoop();
+            spawnShadow();
+        }
+
+        function endGame() {
+            gameActive = false;
+            cancelAnimationFrame(animationFrameId);
+            finalScoreEl.textContent = score;
+            gameOverMenu.classList.remove('hidden');
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('click', handleClick);
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+        
+        // Initial setup
+        resizeCanvas();
+
+    </script>
+</body>
+</html>
